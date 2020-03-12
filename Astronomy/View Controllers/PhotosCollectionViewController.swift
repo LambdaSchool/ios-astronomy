@@ -10,6 +10,7 @@ import UIKit
 
 class PhotosCollectionViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     
+    // MARK: - View LifeCycle
     override func viewDidLoad() {
         super.viewDidLoad()
         
@@ -23,7 +24,7 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
         }
     }
     
-    // UICollectionViewDataSource/Delegate
+    // MARK: - CollectionView DataSource
     
     func numberOfSections(in collectionView: UICollectionView) -> Int {
         return 1
@@ -60,19 +61,48 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
         return UIEdgeInsets(top: 0, left: 10.0, bottom: 0, right: 10.0)
     }
     
+    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        let photoReference = photoReferences[indexPath.item]
+        operations[photoReference.id]?.cancel()
+    }
+    
     // MARK: - Private
     
     private func loadImage(forCell cell: ImageCollectionViewCell, forItemAt indexPath: IndexPath) {
-        
-        // let photoReference = photoReferences[indexPath.item]
-        
-        // TODO: Implement image loading here
+        let photoReference = photoReferences[indexPath.item]
+        if let imageData = cache.value(for: photoReference.id), let image = UIImage(data: imageData) {
+            cell.imageView.image = image
+        } else {
+            let fetchOperation = PhotoFetchOperation(photoReference: photoReference)
+            let cacheOperation = BlockOperation {
+                if let data = fetchOperation.imageData {
+                    self.cache.cache(value: data, for: photoReference.id)
+                }
+            }
+            
+            let setImageOperation = BlockOperation {
+                DispatchQueue.main.async {
+                    if let imageData = fetchOperation.imageData {
+                        cell.imageView.image = UIImage(data: imageData)
+                    }
+                }
+            }
+            cacheOperation.addDependency(fetchOperation)
+            setImageOperation.addDependency(fetchOperation)
+            
+            photoFetchQueue.addOperations([fetchOperation, cacheOperation], waitUntilFinished: false)
+            
+            OperationQueue.main.addOperation(setImageOperation)
+            operations[photoReference.id] = fetchOperation
+        }
     }
     
-    // Properties
-    
+    // MARK: - Properties
+    private let cache = Cache<Int, Data>()
+    private let photoFetchQueue = OperationQueue()
     private let client = MarsRoverClient()
-    
+    private var operations = [Int : Operation]()
+
     private var roverInfo: MarsRover? {
         didSet {
             solDescription = roverInfo?.solDescriptions[3]
@@ -95,5 +125,6 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
         }
     }
     
+    // MARK: - IBOutlets
     @IBOutlet var collectionView: UICollectionView!
 }
